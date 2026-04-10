@@ -278,3 +278,73 @@ contract CorrelA33 {
     // -------------------------
     error C33_Unauthorized();
     error C33_Paused();
+    error C33_Reentry();
+    error C33_Zero();
+    error C33_Same();
+    error C33_BadAddr();
+    error C33_Expired();
+    error C33_BadSig();
+    error C33_BadMarket();
+    error C33_RateLimited();
+    error C33_BadPolicy();
+    error C33_Already();
+    error C33_NotFound();
+    error C33_Locked();
+    error C33_BadValue();
+    error C33_BadIntent();
+    error C33_Timelock();
+    error C33_TooMany();
+    error C33_UnsafeCall();
+
+    // -------------------------
+    // Events (no overlap names)
+    // -------------------------
+    event C33_OwnerNominated(address indexed owner, address indexed nominee);
+    event C33_OwnerChanged(address indexed oldOwner, address indexed newOwner);
+    event C33_PauseFlip(bool paused);
+    event C33_RoleFlip(bytes32 indexed role, address indexed who, bool on);
+    event C33_MarketUpsert(bytes32 indexed market, uint32 feeBps, uint32 lotSizeQ, bool enabled);
+    event C33_StrategyUpsert(bytes32 indexed stratId, address indexed author, uint64 createdAt, uint32 flags);
+    event C33_StrategyRetired(bytes32 indexed stratId, address indexed author, uint64 retiredAt, bytes32 reason);
+    event C33_PolicyPosted(bytes32 indexed policyId, uint64 eta, bytes32 indexed topic, bytes payload);
+    event C33_PolicyExecuted(bytes32 indexed policyId, bytes32 indexed topic);
+    event C33_Signal(
+        bytes32 indexed market,
+        bytes32 indexed stratId,
+        address indexed emitter,
+        uint64 t,
+        uint32 seq,
+        int32 direction,
+        uint32 confidencePpm,
+        uint96 notionalHint,
+        bytes32 salt,
+        bytes32 metaHash
+    );
+    event C33_IntentSubmitted(bytes32 indexed intentId, bytes32 indexed market, address indexed trader, uint64 expiresAt);
+    event C33_IntentCancelled(bytes32 indexed intentId, address indexed trader, uint64 cancelledAt, bytes32 why);
+    event C33_IntentConsumed(bytes32 indexed intentId, address indexed consumer, uint64 t);
+    event C33_Tip(address indexed from, address indexed to, uint256 amount, bytes32 memo);
+
+    // -------------------------
+    // Constants (quirky + safe)
+    // -------------------------
+    uint256 public constant C33_VERSION_NUMBER = 0xC033A33;
+    bytes32 public constant C33_ROLE_OPERATOR = keccak256("C33/role/operator");
+    bytes32 public constant C33_ROLE_RISK = keccak256("C33/role/risk");
+    bytes32 public constant C33_ROLE_SIGNALER = keccak256("C33/role/signaler");
+    bytes32 public constant C33_ROLE_POLICY = keccak256("C33/role/policy");
+    bytes32 public constant C33_ROLE_TREASURY = keccak256("C33/role/treasury");
+
+    uint256 internal constant _REENTRY_FREE = 0;
+    uint256 internal constant _REENTRY_LOCK = 1;
+
+    uint32 internal constant _BPS_DENOM = 10_000;
+    uint32 internal constant _PPM_DENOM = 1_000_000;
+
+    // EIP-712 typing
+    bytes32 internal constant _EIP712_DOMAIN_TYPEHASH =
+        keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract,bytes32 salt)");
+    bytes32 internal constant _INTENT_TYPEHASH =
+        keccak256(
+            "Intent(bytes32 market,address trader,int32 side,uint32 leverageBps,uint96 notional,uint64 expiresAt,uint64 nonce,bytes32 salt,bytes32 memo)"
+        );
