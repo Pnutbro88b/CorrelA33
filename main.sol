@@ -558,3 +558,73 @@ contract CorrelA33 {
     }
 
     function getRecentStrategies(uint64 start, uint64 count) external view returns (bytes32[] memory out) {
+        uint64 s = _recentStrats.size();
+        if (start > s) start = s;
+        uint64 end = start + count;
+        if (end > s) end = s;
+        out = new bytes32[](end - start);
+        for (uint64 i = start; i < end; i++) {
+            out[i - start] = _recentStrats.at(i);
+        }
+    }
+
+    function computeIntentId(Intent memory it) public view returns (bytes32) {
+        bytes32 sh = keccak256(
+            abi.encode(
+                _INTENT_TYPEHASH,
+                it.market,
+                it.trader,
+                it.side,
+                it.leverageBps,
+                it.notional,
+                it.expiresAt,
+                it.nonce,
+                it.salt,
+                it.memo
+            )
+        );
+        return C33ECDSA.toTypedDataHash(domainSeparator(), sh);
+    }
+
+    function computeStrategyAttestHash(
+        bytes32 stratId,
+        address author,
+        uint64 bornAt,
+        bytes32 metaHash,
+        uint32 flags,
+        bytes32 salt
+    ) public view returns (bytes32) {
+        bytes32 sh = keccak256(
+            abi.encode(_STRATEGY_ATTEST_TYPEHASH, stratId, author, bornAt, metaHash, flags, salt)
+        );
+        return C33ECDSA.toTypedDataHash(domainSeparator(), sh);
+    }
+
+    // =============================================================
+    //                         OWNER & ROLES
+    // =============================================================
+
+    function flipPause(bool on) external onlyRole(C33_ROLE_OPERATOR) {
+        if (paused == on) revert C33_Same();
+        paused = on;
+        emit C33_PauseFlip(on);
+    }
+
+    function nominateOwner(address nominee) external onlyOwner {
+        if (nominee == address(0)) revert C33_BadAddr();
+        pendingOwner = nominee;
+        emit C33_OwnerNominated(owner, nominee);
+    }
+
+    function acceptOwner() external {
+        address p = pendingOwner;
+        if (p == address(0) || msg.sender != p) revert C33_Unauthorized();
+        address old = owner;
+        owner = p;
+        pendingOwner = address(0);
+        emit C33_OwnerChanged(old, p);
+    }
+
+    function setRole(bytes32 role, address who, bool on) external onlyOwner {
+        if (who == address(0)) revert C33_BadAddr();
+        if (hasRole[role][who] == on) revert C33_Same();
