@@ -488,3 +488,73 @@ contract CorrelA33 {
 
         // Bootstrap minimal roles to owner.
         hasRole[C33_ROLE_OPERATOR][msg.sender] = true;
+        hasRole[C33_ROLE_RISK][msg.sender] = true;
+        hasRole[C33_ROLE_SIGNALER][msg.sender] = true;
+        hasRole[C33_ROLE_POLICY][msg.sender] = true;
+        hasRole[C33_ROLE_TREASURY][msg.sender] = true;
+
+        emit C33_RoleFlip(C33_ROLE_OPERATOR, msg.sender, true);
+        emit C33_RoleFlip(C33_ROLE_RISK, msg.sender, true);
+        emit C33_RoleFlip(C33_ROLE_SIGNALER, msg.sender, true);
+        emit C33_RoleFlip(C33_ROLE_POLICY, msg.sender, true);
+        emit C33_RoleFlip(C33_ROLE_TREASURY, msg.sender, true);
+
+        // Default emitter pacing for owner (can be changed later).
+        emitterState[msg.sender] = EmitterState({
+            seq: 0,
+            lastTs: uint64(block.timestamp),
+            burst: 0,
+            windowSec: 18,
+            maxPerWindow: 8,
+            minGapSec: 1
+        });
+
+        policyMinDelay = 7 minutes + 33 seconds;
+        policyMaxDelay = 9 days + 5 hours + 19 minutes;
+        policyGrace = 2 days + 4 hours;
+
+        tipReceiver = msg.sender;
+
+        _recentStrats.init(97);
+    }
+
+    // =============================================================
+    //                         VIEW HELPERS
+    // =============================================================
+
+    function name() external pure returns (string memory) {
+        return "CorrelA33";
+    }
+
+    function version() external pure returns (string memory) {
+        return "v0.9.3-signalbus";
+    }
+
+    function domainSeparator() public view returns (bytes32) {
+        return keccak256(
+            abi.encode(
+                _EIP712_DOMAIN_TYPEHASH,
+                keccak256(bytes("CorrelA33")),
+                keccak256(bytes("v0.9.3-signalbus")),
+                block.chainid,
+                address(this),
+                DOMAIN_SALT
+            )
+        );
+    }
+
+    function marketCount() external view returns (uint256) {
+        return marketList.length;
+    }
+
+    function getMarkets(uint256 start, uint256 count) external view returns (bytes32[] memory out) {
+        uint256 n = marketList.length;
+        if (start > n) start = n;
+        uint256 end = C33Math.min(n, start + count);
+        out = new bytes32[](end - start);
+        for (uint256 i = start; i < end; i++) {
+            out[i - start] = marketList[i];
+        }
+    }
+
+    function getRecentStrategies(uint64 start, uint64 count) external view returns (bytes32[] memory out) {
