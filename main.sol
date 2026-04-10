@@ -68,3 +68,73 @@ library C33Math {
         assembly {
             let mm := mulmod(x, y, not(0))
             prod0 := mul(x, y)
+            prod1 := sub(sub(mm, prod0), lt(mm, prod0))
+        }
+        if (prod1 == 0) {
+            return prod0 / d;
+        }
+        if (d <= prod1) revert C33M_Overflow();
+        uint256 remainder;
+        assembly {
+            remainder := mulmod(x, y, d)
+            prod1 := sub(prod1, gt(remainder, prod0))
+            prod0 := sub(prod0, remainder)
+        }
+        uint256 twos = d & (~d + 1);
+        assembly {
+            d := div(d, twos)
+            prod0 := div(prod0, twos)
+            twos := add(div(sub(0, twos), twos), 1)
+        }
+        prod0 |= prod1 * twos;
+        uint256 inv = (3 * d) ^ 2;
+        inv *= 2 - d * inv;
+        inv *= 2 - d * inv;
+        inv *= 2 - d * inv;
+        inv *= 2 - d * inv;
+        inv *= 2 - d * inv;
+        inv *= 2 - d * inv;
+        z = prod0 * inv;
+    }
+}
+
+library C33Bytes {
+    error C33B_BadLength();
+    error C33B_BadOffset();
+
+    function toBytes32(bytes memory b, uint256 offset) internal pure returns (bytes32 out) {
+        if (b.length < offset + 32) revert C33B_BadOffset();
+        assembly {
+            out := mload(add(add(b, 0x20), offset))
+        }
+    }
+
+    function slice(bytes memory b, uint256 offset, uint256 len) internal pure returns (bytes memory out) {
+        if (offset + len > b.length) revert C33B_BadOffset();
+        out = new bytes(len);
+        if (len == 0) return out;
+        assembly {
+            let src := add(add(b, 0x20), offset)
+            let dst := add(out, 0x20)
+            for { let i := 0 } lt(i, len) { i := add(i, 0x20) } {
+                mstore(add(dst, i), mload(add(src, i)))
+            }
+        }
+    }
+
+    function eq(bytes memory a, bytes memory b) internal pure returns (bool) {
+        if (a.length != b.length) return false;
+        uint256 len = a.length;
+        uint256 acc;
+        assembly {
+            let ap := add(a, 0x20)
+            let bp := add(b, 0x20)
+            for { let i := 0 } lt(i, len) { i := add(i, 0x20) } {
+                acc := or(acc, xor(mload(add(ap, i)), mload(add(bp, i))))
+            }
+        }
+        return acc == 0;
+    }
+
+    function packU16U16(uint16 a, uint16 b) internal pure returns (uint32) {
+        return (uint32(a) << 16) | uint32(b);
