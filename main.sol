@@ -138,3 +138,73 @@ library C33Bytes {
 
     function packU16U16(uint16 a, uint16 b) internal pure returns (uint32) {
         return (uint32(a) << 16) | uint32(b);
+    }
+
+    function unpackU16U16(uint32 x) internal pure returns (uint16 a, uint16 b) {
+        a = uint16(x >> 16);
+        b = uint16(x);
+    }
+}
+
+library C33ECDSA {
+    error C33E_BadSig();
+    error C33E_BadV();
+    error C33E_BadS();
+
+    // secp256k1n/2
+    uint256 internal constant _SECP256K1N_HALF =
+        0x7fffffffffffffffffffffffffffffff5d576e7357a4501ddfe92f46681b20a0;
+
+    function recover(bytes32 digest, bytes memory sig) internal pure returns (address) {
+        if (sig.length != 65) revert C33E_BadSig();
+        bytes32 r;
+        bytes32 s;
+        uint8 v;
+        assembly {
+            r := mload(add(sig, 0x20))
+            s := mload(add(sig, 0x40))
+            v := byte(0, mload(add(sig, 0x60)))
+        }
+        if (v < 27) v += 27;
+        if (v != 27 && v != 28) revert C33E_BadV();
+        if (uint256(s) > _SECP256K1N_HALF) revert C33E_BadS();
+        address signer = ecrecover(digest, v, r, s);
+        if (signer == address(0)) revert C33E_BadSig();
+        return signer;
+    }
+
+    function toEthSignedMessageHash(bytes32 payload) internal pure returns (bytes32) {
+        return keccak256(abi.encodePacked("\x19Ethereum Signed Message:\n32", payload));
+    }
+
+    function toTypedDataHash(bytes32 domainSeparator, bytes32 structHash) internal pure returns (bytes32) {
+        return keccak256(abi.encodePacked("\x19\x01", domainSeparator, structHash));
+    }
+}
+
+library C33BitMaps {
+    error C33BM_Range();
+
+    struct BitMap {
+        mapping(uint256 wordIndex => uint256) data;
+    }
+
+    function get(BitMap storage bm, uint256 index) internal view returns (bool) {
+        uint256 wordIndex = index >> 8;
+        uint256 bitIndex = index & 255;
+        uint256 word = bm.data[wordIndex];
+        return (word >> bitIndex) & 1 == 1;
+    }
+
+    function set(BitMap storage bm, uint256 index) internal {
+        uint256 wordIndex = index >> 8;
+        uint256 bitIndex = index & 255;
+        bm.data[wordIndex] |= (1 << bitIndex);
+    }
+
+    function unset(BitMap storage bm, uint256 index) internal {
+        uint256 wordIndex = index >> 8;
+        uint256 bitIndex = index & 255;
+        bm.data[wordIndex] &= ~(1 << bitIndex);
+    }
+}
