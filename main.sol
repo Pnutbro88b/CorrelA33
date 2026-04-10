@@ -348,3 +348,73 @@ contract CorrelA33 {
         keccak256(
             "Intent(bytes32 market,address trader,int32 side,uint32 leverageBps,uint96 notional,uint64 expiresAt,uint64 nonce,bytes32 salt,bytes32 memo)"
         );
+    bytes32 internal constant _STRATEGY_ATTEST_TYPEHASH =
+        keccak256("StrategyAttest(bytes32 stratId,address author,uint64 bornAt,bytes32 metaHash,uint32 flags,bytes32 salt)");
+
+    // -------------------------
+    // Immutables (random seeds)
+    // -------------------------
+    address public immutable GENESIS_SPICE;
+    address public immutable TELEGRAM_GHOST;
+    address public immutable DESKTOP_ANCHOR;
+    bytes32 public immutable DOMAIN_SALT;
+
+    // -------------------------
+    // Access control & admin
+    // -------------------------
+    address public owner;
+    address public pendingOwner;
+    bool public paused;
+    uint256 private _guard;
+
+    mapping(bytes32 role => mapping(address who => bool)) public hasRole;
+
+    modifier onlyOwner() {
+        if (msg.sender != owner) revert C33_Unauthorized();
+        _;
+    }
+
+    modifier onlyRole(bytes32 role) {
+        if (!hasRole[role][msg.sender] && msg.sender != owner) revert C33_Unauthorized();
+        _;
+    }
+
+    modifier whenLive() {
+        if (paused) revert C33_Paused();
+        _;
+    }
+
+    modifier nonReentrant() {
+        if (_guard == _REENTRY_LOCK) revert C33_Reentry();
+        _guard = _REENTRY_LOCK;
+        _;
+        _guard = _REENTRY_FREE;
+    }
+
+    // -------------------------
+    // Market/strategy registry
+    // -------------------------
+    struct Market {
+        uint32 feeBps;     // fee basis points for offchain accounting hints
+        uint32 lotSizeQ;   // quantity granularity (Q units)
+        uint8 enabled;     // 1 enabled, 0 disabled
+        uint8 _pad0;
+        uint16 _pad1;
+        uint64 updatedAt;
+    }
+
+    mapping(bytes32 market => Market) public markets;
+    bytes32[] public marketList;
+    mapping(bytes32 market => bool) internal _marketSeen;
+
+    struct Strategy {
+        address author;
+        uint64 createdAt;
+        uint64 retiredAt;
+        uint32 flags;
+        bytes32 metaHash; // offchain metadata hash (e.g., IPFS CID hash)
+    }
+
+    mapping(bytes32 stratId => Strategy) public strategies;
+    C33RingBuffer.Buf private _recentStrats; // last N registered strategies
+
