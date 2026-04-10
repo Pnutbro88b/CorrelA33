@@ -208,3 +208,73 @@ library C33BitMaps {
         bm.data[wordIndex] &= ~(1 << bitIndex);
     }
 }
+
+library C33RingBuffer {
+    error C33RB_Empty();
+    error C33RB_Full();
+
+    struct Buf {
+        uint64 head;
+        uint64 tail;
+        uint64 cap;
+        mapping(uint64 idx => bytes32) items;
+    }
+
+    function init(Buf storage b, uint64 cap) internal {
+        b.head = 1;
+        b.tail = 1;
+        b.cap = cap;
+    }
+
+    function size(Buf storage b) internal view returns (uint64) {
+        unchecked {
+            return b.tail >= b.head ? (b.tail - b.head) : 0;
+        }
+    }
+
+    function push(Buf storage b, bytes32 x) internal {
+        uint64 cap = b.cap;
+        if (cap == 0) revert C33RB_Full();
+        uint64 nextTail;
+        unchecked {
+            nextTail = b.tail + 1;
+        }
+        if (nextTail - b.head > cap) revert C33RB_Full();
+        b.items[b.tail] = x;
+        b.tail = nextTail;
+    }
+
+    function pop(Buf storage b) internal returns (bytes32 x) {
+        if (b.tail == b.head) revert C33RB_Empty();
+        x = b.items[b.head];
+        delete b.items[b.head];
+        unchecked {
+            b.head += 1;
+        }
+    }
+
+    function at(Buf storage b, uint64 i) internal view returns (bytes32) {
+        uint64 s = size(b);
+        if (i >= s) revert C33RB_Empty();
+        uint64 idx;
+        unchecked {
+            idx = b.head + i;
+        }
+        return b.items[idx];
+    }
+}
+
+// =============================================================
+//                          MAIN CONTRACT
+// =============================================================
+
+contract CorrelA33 {
+    using C33Math for uint256;
+    using C33BitMaps for C33BitMaps.BitMap;
+    using C33RingBuffer for C33RingBuffer.Buf;
+
+    // -------------------------
+    // Errors (unique namespace)
+    // -------------------------
+    error C33_Unauthorized();
+    error C33_Paused();
