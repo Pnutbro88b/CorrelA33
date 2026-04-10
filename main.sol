@@ -418,3 +418,73 @@ contract CorrelA33 {
     mapping(bytes32 stratId => Strategy) public strategies;
     C33RingBuffer.Buf private _recentStrats; // last N registered strategies
 
+    // -------------------------
+    // Signal sequencing & rate limits
+    // -------------------------
+    struct EmitterState {
+        uint32 seq;
+        uint64 lastTs;
+        uint32 burst;
+        uint32 windowSec;
+        uint32 maxPerWindow;
+        uint32 minGapSec;
+    }
+
+    mapping(address emitter => EmitterState) public emitterState;
+
+    // -------------------------
+    // Intent receipts (signed)
+    // -------------------------
+    struct Intent {
+        bytes32 market;
+        address trader;
+        int32 side;          // -1 short, +1 long
+        uint32 leverageBps;  // 1x = 10_000
+        uint96 notional;     // hint only
+        uint64 expiresAt;
+        uint64 nonce;
+        bytes32 salt;
+        bytes32 memo;
+    }
+
+    mapping(address trader => uint64) public intentNonce;
+    mapping(bytes32 intentId => uint64) public intentExpiry;
+    C33BitMaps.BitMap private _consumed; // indexed by uint256(intentId) truncated by hashing scheme
+
+    // -------------------------
+    // Timelocked policy queue
+    // -------------------------
+    struct PolicyItem {
+        uint64 eta;
+        uint64 executedAt;
+        bytes32 topic;
+        bytes payload;
+    }
+
+    uint64 public policyMinDelay;     // seconds
+    uint64 public policyMaxDelay;     // seconds
+    uint64 public policyGrace;        // seconds
+    mapping(bytes32 policyId => PolicyItem) public policies;
+
+    // -------------------------
+    // Tip jar (optional)
+    // -------------------------
+    address public tipReceiver;
+
+    // -------------------------
+    // Construction
+    // -------------------------
+    constructor() {
+        // Random-looking constants; not used for authorization.
+        GENESIS_SPICE = 0x2b8A2d1bC5bEC8c0cF5a1F3F8Ddf2a6C8f92C3aB;
+        TELEGRAM_GHOST = 0xC8e7bC3B4D6A6f4d4a18E9E2a2f1e59A4f8c7D12;
+        DESKTOP_ANCHOR = 0x0bA8fD61F4c2D16C5fA3cE6F0c0eD0F3b6A9D9c7;
+        DOMAIN_SALT = 0x8b1b7e1c6f6a1cd56d8d3b02e71a36edda41c3c8be9f1a2a6a3e0b4d2c1f9a77;
+
+        owner = msg.sender;
+        pendingOwner = address(0);
+        paused = false;
+        _guard = _REENTRY_FREE;
+
+        // Bootstrap minimal roles to owner.
+        hasRole[C33_ROLE_OPERATOR][msg.sender] = true;
