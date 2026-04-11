@@ -628,3 +628,73 @@ contract CorrelA33 {
     function setRole(bytes32 role, address who, bool on) external onlyOwner {
         if (who == address(0)) revert C33_BadAddr();
         if (hasRole[role][who] == on) revert C33_Same();
+        hasRole[role][who] = on;
+        emit C33_RoleFlip(role, who, on);
+    }
+
+    // =============================================================
+    //                         MARKET CONTROL
+    // =============================================================
+
+    function upsertMarket(bytes32 market, uint32 feeBps, uint32 lotSizeQ, bool enabled) external onlyRole(C33_ROLE_RISK) {
+        if (market == bytes32(0)) revert C33_Zero();
+        if (feeBps > 2500) revert C33_BadValue();
+        if (lotSizeQ == 0) revert C33_BadValue();
+        Market storage m = markets[market];
+        m.feeBps = feeBps;
+        m.lotSizeQ = lotSizeQ;
+        m.enabled = enabled ? 1 : 0;
+        m.updatedAt = uint64(block.timestamp);
+        if (!_marketSeen[market]) {
+            _marketSeen[market] = true;
+            marketList.push(market);
+        }
+        emit C33_MarketUpsert(market, feeBps, lotSizeQ, enabled);
+    }
+
+    function setTipReceiver(address to) external onlyRole(C33_ROLE_TREASURY) {
+        if (to == address(0)) revert C33_BadAddr();
+        if (tipReceiver == to) revert C33_Same();
+        tipReceiver = to;
+    }
+
+    // =============================================================
+    //                         STRATEGY REGISTRY
+    // =============================================================
+
+    function upsertStrategy(bytes32 stratId, bytes32 metaHash, uint32 flags) external whenLive nonReentrant {
+        if (stratId == bytes32(0) || metaHash == bytes32(0)) revert C33_Zero();
+        Strategy storage s = strategies[stratId];
+
+        if (s.author == address(0)) {
+            s.author = msg.sender;
+            s.createdAt = uint64(block.timestamp);
+            s.retiredAt = 0;
+            s.flags = flags;
+            s.metaHash = metaHash;
+            emit C33_StrategyUpsert(stratId, msg.sender, s.createdAt, flags);
+            _recentStrats.push(stratId);
+            return;
+        }
+
+        if (s.author != msg.sender) revert C33_Unauthorized();
+        if (s.retiredAt != 0) revert C33_Locked();
+        s.flags = flags;
+        s.metaHash = metaHash;
+        emit C33_StrategyUpsert(stratId, msg.sender, s.createdAt, flags);
+    }
+
+    function retireStrategy(bytes32 stratId, bytes32 reason) external whenLive nonReentrant {
+        Strategy storage s = strategies[stratId];
+        if (s.author == address(0)) revert C33_NotFound();
+        if (s.author != msg.sender && msg.sender != owner && !hasRole[C33_ROLE_RISK][msg.sender]) revert C33_Unauthorized();
+        if (s.retiredAt != 0) revert C33_Already();
+        s.retiredAt = uint64(block.timestamp);
+        emit C33_StrategyRetired(stratId, s.author, s.retiredAt, reason);
+    }
+
+    function attestStrategy(
+        bytes32 stratId,
+        address author,
+        uint64 bornAt,
+        bytes32 metaHash,
