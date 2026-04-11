@@ -698,3 +698,73 @@ contract CorrelA33 {
         address author,
         uint64 bornAt,
         bytes32 metaHash,
+        uint32 flags,
+        bytes32 salt,
+        bytes calldata sig
+    ) external whenLive nonReentrant {
+        if (stratId == bytes32(0) || author == address(0) || metaHash == bytes32(0) || salt == bytes32(0)) revert C33_Zero();
+        bytes32 digest = computeStrategyAttestHash(stratId, author, bornAt, metaHash, flags, salt);
+        address signer = C33ECDSA.recover(digest, sig);
+        if (signer != author) revert C33_BadSig();
+
+        Strategy storage s = strategies[stratId];
+        if (s.author != address(0)) revert C33_Already();
+        s.author = author;
+        s.createdAt = bornAt == 0 ? uint64(block.timestamp) : bornAt;
+        s.retiredAt = 0;
+        s.flags = flags;
+        s.metaHash = metaHash;
+        emit C33_StrategyUpsert(stratId, author, s.createdAt, flags);
+        _recentStrats.push(stratId);
+    }
+
+    // =============================================================
+    //                         EMITTER PACING
+    // =============================================================
+
+    function setEmitterPacing(
+        address emitter,
+        uint32 windowSec,
+        uint32 maxPerWindow,
+        uint32 minGapSec
+    ) external onlyRole(C33_ROLE_RISK) {
+        if (emitter == address(0)) revert C33_BadAddr();
+        if (windowSec == 0 || windowSec > 3600) revert C33_BadValue();
+        if (maxPerWindow == 0 || maxPerWindow > 2048) revert C33_BadValue();
+        if (minGapSec > 3600) revert C33_BadValue();
+        EmitterState storage es = emitterState[emitter];
+        es.windowSec = windowSec;
+        es.maxPerWindow = maxPerWindow;
+        es.minGapSec = minGapSec;
+        if (es.lastTs == 0) es.lastTs = uint64(block.timestamp);
+    }
+
+    function _pace(address emitter) internal returns (uint32 seq, uint64 tNow) {
+        EmitterState storage es = emitterState[emitter];
+        if (es.windowSec == 0) {
+            // default pacing if unset
+            es.windowSec = 21;
+            es.maxPerWindow = 9;
+            es.minGapSec = 1;
+            es.lastTs = uint64(block.timestamp);
+        }
+        tNow = uint64(block.timestamp);
+        uint64 last = es.lastTs;
+
+        if (es.minGapSec != 0 && tNow < last + es.minGapSec) revert C33_RateLimited();
+
+        // windowed burst counter
+        if (tNow > last + es.windowSec) {
+            es.burst = 0;
+        }
+        if (es.burst + 1 > es.maxPerWindow) revert C33_RateLimited();
+
+        unchecked {
+            es.seq = es.seq + 1;
+            es.burst = es.burst + 1;
+        }
+
+        es.lastTs = tNow;
+        seq = es.seq;
+    }
+
