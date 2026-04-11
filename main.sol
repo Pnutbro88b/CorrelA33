@@ -908,3 +908,73 @@ contract CorrelA33 {
         PolicyItem storage p = policies[policyId];
         if (p.eta != 0) revert C33_Already();
         p.eta = eta;
+        p.executedAt = 0;
+        p.topic = topic;
+        p.payload = payload;
+        emit C33_PolicyPosted(policyId, eta, topic, payload);
+    }
+
+    function cancelPolicy(bytes32 policyId) external onlyOwner {
+        PolicyItem storage p = policies[policyId];
+        if (p.eta == 0) revert C33_NotFound();
+        if (p.executedAt != 0) revert C33_Already();
+        delete policies[policyId];
+    }
+
+    function executePolicy(bytes32 policyId) external whenLive nonReentrant {
+        PolicyItem storage p = policies[policyId];
+        uint64 eta = p.eta;
+        if (eta == 0) revert C33_NotFound();
+        if (p.executedAt != 0) revert C33_Already();
+
+        uint64 t = uint64(block.timestamp);
+        if (t < eta) revert C33_Timelock();
+        if (t > eta + policyGrace) revert C33_Expired();
+
+        // mark executed first
+        p.executedAt = t;
+
+        bytes32 topic = p.topic;
+        bytes memory payload = p.payload;
+
+        _dispatchPolicy(topic, payload);
+        emit C33_PolicyExecuted(policyId, topic);
+    }
+
+    // Topics are deliberately "string-hashed" and the payload is ABI encoded.
+    // This avoids upgrade patterns and keeps behavior explicit.
+    function _dispatchPolicy(bytes32 topic, bytes memory payload) internal {
+        // topic: "C33/pause" (bool)
+        if (topic == keccak256("C33/pause")) {
+            bool on = abi.decode(payload, (bool));
+            paused = on;
+            emit C33_PauseFlip(on);
+            return;
+        }
+
+        // topic: "C33/setTipReceiver" (address)
+        if (topic == keccak256("C33/setTipReceiver")) {
+            address to = abi.decode(payload, (address));
+            if (to == address(0)) revert C33_BadAddr();
+            tipReceiver = to;
+            return;
+        }
+
+        // topic: "C33/role" (bytes32 role, address who, bool on)
+        if (topic == keccak256("C33/role")) {
+            (bytes32 role, address who, bool on) = abi.decode(payload, (bytes32, address, bool));
+            if (who == address(0)) revert C33_BadAddr();
+            hasRole[role][who] = on;
+            emit C33_RoleFlip(role, who, on);
+            return;
+        }
+
+        // topic: "C33/market" (bytes32 market, uint32 feeBps, uint32 lotSizeQ, bool enabled)
+        if (topic == keccak256("C33/market")) {
+            (bytes32 market, uint32 feeBps, uint32 lotSizeQ, bool enabled) =
+                abi.decode(payload, (bytes32, uint32, uint32, bool));
+            if (market == bytes32(0)) revert C33_Zero();
+            if (feeBps > 2500) revert C33_BadValue();
+            if (lotSizeQ == 0) revert C33_BadValue();
+            Market storage m = markets[market];
+            m.feeBps = feeBps;
