@@ -978,3 +978,73 @@ contract CorrelA33 {
             if (lotSizeQ == 0) revert C33_BadValue();
             Market storage m = markets[market];
             m.feeBps = feeBps;
+            m.lotSizeQ = lotSizeQ;
+            m.enabled = enabled ? 1 : 0;
+            m.updatedAt = uint64(block.timestamp);
+            if (!_marketSeen[market]) {
+                _marketSeen[market] = true;
+                marketList.push(market);
+            }
+            emit C33_MarketUpsert(market, feeBps, lotSizeQ, enabled);
+            return;
+        }
+
+        // topic: "C33/emitterPacing" (address emitter, uint32 windowSec, uint32 maxPerWindow, uint32 minGapSec)
+        if (topic == keccak256("C33/emitterPacing")) {
+            (address emitter, uint32 windowSec, uint32 maxPerWindow, uint32 minGapSec) =
+                abi.decode(payload, (address, uint32, uint32, uint32));
+            if (emitter == address(0)) revert C33_BadAddr();
+            if (windowSec == 0 || windowSec > 3600) revert C33_BadValue();
+            if (maxPerWindow == 0 || maxPerWindow > 2048) revert C33_BadValue();
+            if (minGapSec > 3600) revert C33_BadValue();
+            EmitterState storage es = emitterState[emitter];
+            es.windowSec = windowSec;
+            es.maxPerWindow = maxPerWindow;
+            es.minGapSec = minGapSec;
+            if (es.lastTs == 0) es.lastTs = uint64(block.timestamp);
+            return;
+        }
+
+        revert C33_BadPolicy();
+    }
+
+    // =============================================================
+    //                         TIP JAR
+    // =============================================================
+
+    receive() external payable {
+        if (msg.value == 0) return;
+        address to = tipReceiver;
+        if (to == address(0)) to = owner;
+        (bool ok,) = to.call{value: msg.value}("");
+        if (!ok) revert C33_UnsafeCall();
+        emit C33_Tip(msg.sender, to, msg.value, bytes32(uint256(uint160(msg.sender)) ^ uint256(DOMAIN_SALT)));
+    }
+
+    function tip(bytes32 memo) external payable whenLive nonReentrant {
+        if (msg.value == 0) revert C33_BadValue();
+        address to = tipReceiver;
+        if (to == address(0)) to = owner;
+        (bool ok,) = to.call{value: msg.value}("");
+        if (!ok) revert C33_UnsafeCall();
+        emit C33_Tip(msg.sender, to, msg.value, memo);
+    }
+
+    // =============================================================
+    //                  BULK UTILITIES (BOT-FRIENDLY)
+    // =============================================================
+
+    function batchEmitSignals(
+        bytes32[] calldata markets_,
+        bytes32[] calldata stratIds_,
+        int32[] calldata directions_,
+        uint32[] calldata confidencePpm_,
+        uint96[] calldata notionalHints_,
+        bytes32[] calldata salts_,
+        bytes32[] calldata metaHashes_
+    ) external whenLive nonReentrant onlyRole(C33_ROLE_SIGNALER) {
+        uint256 n = markets_.length;
+        if (
+            stratIds_.length != n ||
+            directions_.length != n ||
+            confidencePpm_.length != n ||
