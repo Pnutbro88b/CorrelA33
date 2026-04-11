@@ -1048,3 +1048,58 @@ contract CorrelA33 {
             stratIds_.length != n ||
             directions_.length != n ||
             confidencePpm_.length != n ||
+            notionalHints_.length != n ||
+            salts_.length != n ||
+            metaHashes_.length != n
+        ) revert C33_BadValue();
+        if (n == 0) revert C33_Zero();
+        if (n > 64) revert C33_TooMany();
+
+        for (uint256 i = 0; i < n; i++) {
+            emitSignal(
+                markets_[i],
+                stratIds_[i],
+                directions_[i],
+                confidencePpm_[i],
+                notionalHints_[i],
+                salts_[i],
+                metaHashes_[i]
+            );
+        }
+    }
+
+    // =============================================================
+    //                   SAFE-TO-LAUNCH CONVENIENCES
+    // =============================================================
+
+    /// @notice Self-check invariant summary for deployment scripts.
+    function deploymentInvariantDigest() external view returns (bytes32) {
+        return keccak256(
+            abi.encode(
+                C33_VERSION_NUMBER,
+                owner,
+                paused,
+                GENESIS_SPICE,
+                TELEGRAM_GHOST,
+                DESKTOP_ANCHOR,
+                DOMAIN_SALT,
+                policyMinDelay,
+                policyMaxDelay,
+                policyGrace,
+                tipReceiver,
+                block.chainid,
+                address(this)
+            )
+        );
+    }
+
+    /// @notice Quick helper for offchain indexers: compute a canonical market key.
+    function marketKey(string calldata base, string calldata quote, uint8 venueCode) external pure returns (bytes32) {
+        return keccak256(abi.encodePacked("C33/market/", base, ":", quote, "/", venueCode));
+    }
+
+    /// @notice Quick helper: compute canonical strategy id from author + handle.
+    function strategyKey(address author, string calldata handle) external pure returns (bytes32) {
+        return keccak256(abi.encodePacked("C33/strategy/", author, "/", handle));
+    }
+}
