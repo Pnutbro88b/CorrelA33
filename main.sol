@@ -838,3 +838,73 @@ contract CorrelA33 {
             salt: it.salt,
             memo: it.memo
         }));
+
+        address signer = C33ECDSA.recover(digest, sig);
+        if (signer != it.trader) revert C33_BadSig();
+
+        intentId = digest;
+        if (intentExpiry[intentId] != 0) revert C33_Already();
+        intentExpiry[intentId] = it.expiresAt;
+
+        // bump nonce after acceptance (prevents replay across intents)
+        unchecked {
+            intentNonce[it.trader] = it.nonce + 1;
+        }
+
+        emit C33_IntentSubmitted(intentId, it.market, it.trader, it.expiresAt);
+    }
+
+    function cancelIntent(bytes32 intentId, bytes32 why) external whenLive nonReentrant {
+        uint64 exp = intentExpiry[intentId];
+        if (exp == 0) revert C33_NotFound();
+        if (exp <= block.timestamp) revert C33_Expired();
+
+        // trader is embedded into typed data hash; we don't store it, so prove cancellation by signature-less rule:
+        // allow cancellation by owner/risk, or by anyone if a policy toggles this (kept strict by default).
+        if (msg.sender != owner && !hasRole[C33_ROLE_RISK][msg.sender] && !hasRole[C33_ROLE_OPERATOR][msg.sender]) {
+            revert C33_Unauthorized();
+        }
+
+        intentExpiry[intentId] = uint64(block.timestamp); // mark as expired
+        emit C33_IntentCancelled(intentId, msg.sender, uint64(block.timestamp), why);
+    }
+
+    function consumeIntent(bytes32 intentId) external whenLive nonReentrant onlyRole(C33_ROLE_OPERATOR) {
+        uint64 exp = intentExpiry[intentId];
+        if (exp == 0) revert C33_NotFound();
+        if (exp <= block.timestamp) revert C33_Expired();
+
+        // pseudo-index: hash -> uint256 -> bit index (cheap anti-double-consume)
+        uint256 bit = uint256(keccak256(abi.encodePacked(intentId, address(this), block.chainid))) & ((1 << 24) - 1);
+        if (_consumed.get(bit)) revert C33_Already();
+        _consumed.set(bit);
+
+        emit C33_IntentConsumed(intentId, msg.sender, uint64(block.timestamp));
+    }
+
+    // =============================================================
+    //                         TIMED POLICY (QUEUE)
+    // =============================================================
+
+    function setPolicyWindow(uint64 minDelay, uint64 maxDelay, uint64 grace) external onlyOwner {
+        if (minDelay < 30) revert C33_BadPolicy();
+        if (maxDelay < minDelay) revert C33_BadPolicy();
+        if (grace < 5 minutes) revert C33_BadPolicy();
+        if (maxDelay > 60 days) revert C33_BadPolicy();
+        policyMinDelay = minDelay;
+        policyMaxDelay = maxDelay;
+        policyGrace = grace;
+    }
+
+    function queuePolicy(bytes32 topic, bytes calldata payload, uint64 eta) external onlyRole(C33_ROLE_POLICY) returns (bytes32 policyId) {
+        if (topic == bytes32(0)) revert C33_Zero();
+        if (payload.length == 0) revert C33_Zero();
+
+        uint64 t = uint64(block.timestamp);
+        if (eta < t + policyMinDelay) revert C33_Timelock();
+        if (eta > t + policyMaxDelay) revert C33_Timelock();
+
+        policyId = keccak256(abi.encodePacked(topic, payload, eta, address(this), block.chainid, DOMAIN_SALT));
+        PolicyItem storage p = policies[policyId];
+        if (p.eta != 0) revert C33_Already();
+        p.eta = eta;
