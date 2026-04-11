@@ -768,3 +768,73 @@ contract CorrelA33 {
         seq = es.seq;
     }
 
+    // =============================================================
+    //                         SIGNAL EMISSION
+    // =============================================================
+
+    function emitSignal(
+        bytes32 market,
+        bytes32 stratId,
+        int32 direction,
+        uint32 confidencePpm,
+        uint96 notionalHint,
+        bytes32 salt,
+        bytes32 metaHash
+    ) external whenLive nonReentrant onlyRole(C33_ROLE_SIGNALER) {
+        Market memory m = markets[market];
+        if (m.lotSizeQ == 0 || m.enabled == 0) revert C33_BadMarket();
+        Strategy memory s = strategies[stratId];
+        if (s.author == address(0) || s.retiredAt != 0) revert C33_BadIntent();
+
+        if (direction != -1 && direction != 0 && direction != 1) revert C33_BadValue();
+        if (confidencePpm > _PPM_DENOM) revert C33_BadValue();
+        if (salt == bytes32(0) || metaHash == bytes32(0)) revert C33_Zero();
+
+        (uint32 seq, uint64 t) = _pace(msg.sender);
+
+        emit C33_Signal(
+            market,
+            stratId,
+            msg.sender,
+            t,
+            seq,
+            direction,
+            confidencePpm,
+            notionalHint,
+            salt,
+            metaHash
+        );
+    }
+
+    // =============================================================
+    //                         INTENTS (SIGNED)
+    // =============================================================
+
+    function submitIntent(
+        Intent calldata it,
+        bytes calldata sig
+    ) external whenLive nonReentrant returns (bytes32 intentId) {
+        if (it.market == bytes32(0) || it.trader == address(0) || it.salt == bytes32(0) || it.memo == bytes32(0)) revert C33_Zero();
+        Market memory m = markets[it.market];
+        if (m.lotSizeQ == 0 || m.enabled == 0) revert C33_BadMarket();
+
+        if (it.side != -1 && it.side != 1) revert C33_BadValue();
+        if (it.leverageBps < 10_000 || it.leverageBps > 250_000) revert C33_BadValue();
+        if (it.notional == 0) revert C33_BadValue();
+        if (it.expiresAt <= block.timestamp) revert C33_Expired();
+        if (it.expiresAt > block.timestamp + 7 days + 6 hours) revert C33_Expired();
+
+        // require trader nonce monotonicity
+        if (it.nonce != intentNonce[it.trader]) revert C33_BadIntent();
+
+        bytes32 digest = computeIntentId(Intent({
+            market: it.market,
+            trader: it.trader,
+            side: it.side,
+            leverageBps: it.leverageBps,
+            notional: it.notional,
+            expiresAt: it.expiresAt,
+            nonce: it.nonce,
+            salt: it.salt,
+            memo: it.memo
+        }));
